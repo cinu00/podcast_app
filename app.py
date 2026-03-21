@@ -6,9 +6,22 @@ from openai import OpenAI
 from pydub import AudioSegment
 import yt_dlp
 
+# 🔥 musi być pierwsze
+st.set_page_config(page_title="Podcast Analyzer AI")
+
 # 🔑 API
 load_dotenv()
-api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+try:
+    api_key = st.secrets["OPENAI_API_KEY"]
+except Exception:
+    api_key = os.getenv("OPENAI_API_KEY")
+
+st.write("API key:", api_key)
+
+if not api_key:
+    st.error("Brak klucza API!")
+    st.stop()
 
 client = OpenAI(api_key=api_key)
 
