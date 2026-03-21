@@ -1,0 +1,6 @@
+streamlit
+openai==1.47
+python-dotenv
+pydub
+yt-dlp
+ffmpeg-python
