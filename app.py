@@ -17,7 +17,6 @@ try:
 except Exception:
     api_key = os.getenv("OPENAI_API_KEY")
 
-st.write("API key:", api_key)
 
 if not api_key:
     st.error("Brak klucza API!")
