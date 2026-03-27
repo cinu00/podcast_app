@@ -1,11 +1,3 @@
-import shutil
-import streamlit as st
-
-st.write("ffmpeg:", shutil.which("ffmpeg"))
-st.write("ffprobe:", shutil.which("ffprobe"))
-
-
-
 import streamlit as st
 import tempfile
 import os
@@ -14,22 +6,25 @@ from openai import OpenAI
 from pydub import AudioSegment
 import yt_dlp
 
-
-
 # 🔹 1. ustawienia strony
 st.set_page_config(page_title="Podcast Analyzer AI")
 
-# 🔹 2. wczytanie zmiennych środowiskowych lokalnie
+# 🔹 2. Wczytanie zmiennych środowiskowych
 load_dotenv()
 
-# 🔹 3. Wklejenie własnego klucza w UI (zabezpieczenie)
+# 🔹 3. Klucz OpenAI
 api_key = st.text_input("Wklej swój OpenAI API Key:", type="password") or os.getenv("OPENAI_API_KEY")
 if not api_key:
-    st.warning("Musisz podać swój klucz API, aby korzystać z aplikacji!")
+    st.warning("Musisz podać swój klucz API!")
     st.stop()
 
-# 🔹 4. Tworzymy klienta OpenAI
+# 🔹 4. Klient OpenAI
 client = OpenAI(api_key=api_key)
+
+# 🔹 5. Ścieżki do ffmpeg/ffprobe w DigitalOcean
+AudioSegment.converter = "/layers/digitalocean_apt/apt/usr/bin/ffmpeg"
+AudioSegment.ffprobe   = "/layers/digitalocean_apt/apt/usr/bin/ffprobe"
+
 # --------------------------
 # UI: upload pliku lub link
 # --------------------------
@@ -46,8 +41,15 @@ def extract_audio_from_video(video_file):
         tmp_video.write(video_file.read())
         tmp_video_path = tmp_video.name
 
-    audio = AudioSegment.from_file(tmp_video_path, format="mp4")
-    tmp_audio_path = tmp_video_path.replace(".mp4", ".wav")
+    if not os.path.exists(tmp_video_path) or os.path.getsize(tmp_video_path) == 0:
+        raise ValueError("Przesłany plik jest pusty lub nie został zapisany poprawnie!")
+
+    try:
+        audio = AudioSegment.from_file(tmp_video_path)
+    except Exception as e:
+        raise RuntimeError(f"Nie udało się odczytać audio z pliku: {e}")
+
+    tmp_audio_path = tmp_video_path.rsplit(".", 1)[0] + ".wav"
     audio.export(tmp_audio_path, format="wav")
     return tmp_audio_path
 
@@ -78,7 +80,7 @@ def transcribe_audio(file_path):
     return transcription.text
 
 # --------------------------
-# Funkcja: dzielenie tekstu (chunking)
+# Funkcja: dzielenie tekstu
 # --------------------------
 def split_text(text, max_length=4000):
     return [text[i:i+max_length] for i in range(0, len(text), max_length)]
@@ -112,24 +114,32 @@ Tekst:
 if st.button("🚀 Analizuj podcast"):
 
     # 1️⃣ przygotowanie audio
-    if youtube_url:
-        with st.spinner("📥 Pobieranie audio z YouTube..."):
-            audio_path = download_audio_from_youtube(youtube_url)
+    try:
+        if youtube_url:
+            with st.spinner("📥 Pobieranie audio z YouTube..."):
+                audio_path = download_audio_from_youtube(youtube_url)
 
-    elif uploaded_file:
-        if "video" in uploaded_file.type:
-            audio_path = extract_audio_from_video(uploaded_file)
+        elif uploaded_file:
+            if uploaded_file.type.startswith("video"):
+                audio_path = extract_audio_from_video(uploaded_file)
+            else:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                    tmp.write(uploaded_file.read())
+                    audio_path = tmp.name
         else:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(uploaded_file.read())
-                audio_path = tmp.name
-    else:
-        st.error("Wrzuć plik lub podaj link do YouTube!")
+            st.error("Wrzuć plik lub podaj link do YouTube!")
+            st.stop()
+    except Exception as e:
+        st.error(f"Nie udało się przygotować audio: {e}")
         st.stop()
 
     # 2️⃣ transkrypcja
-    with st.spinner("📝 Transkrypcja..."):
-        text = transcribe_audio(audio_path)
+    try:
+        with st.spinner("📝 Transkrypcja..."):
+            text = transcribe_audio(audio_path)
+    except Exception as e:
+        st.error(f"Błąd transkrypcji: {e}")
+        st.stop()
 
     st.subheader("📄 Transkrypcja")
     st.write(text)
@@ -149,4 +159,7 @@ if st.button("🚀 Analizuj podcast"):
     st.write(final_summary)
 
     # 5️⃣ sprzątanie pliku tymczasowego
-    os.remove(audio_path)
+    try:
+        os.remove(audio_path)
+    except:
+        pass
