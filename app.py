@@ -6,43 +6,38 @@ from openai import OpenAI
 from pydub import AudioSegment
 import yt_dlp
 
-# 🔹 1. ustawienia strony
+# --------------------------
+# 1️⃣ Ustawienia strony
+# --------------------------
 st.set_page_config(page_title="Podcast Analyzer AI")
+load_dotenv()  # Wczytanie zmiennych środowiskowych
 
-# 🔹 2. Wczytanie zmiennych środowiskowych
-load_dotenv()
-
-# 🔹 3. Klucz OpenAI
+# --------------------------
+# 2️⃣ Klucz API OpenAI
+# --------------------------
 api_key = st.text_input("Wklej swój OpenAI API Key:", type="password") or os.getenv("OPENAI_API_KEY")
 if not api_key:
-    st.warning("Musisz podać swój klucz API!")
+    st.warning("Musisz podać swój klucz API, aby korzystać z aplikacji!")
     st.stop()
-
-# 🔹 4. Klient OpenAI
 client = OpenAI(api_key=api_key)
 
-# 🔹 5. Ścieżki do ffmpeg/ffprobe w DigitalOcean
-AudioSegment.converter = "/layers/digitalocean_apt/apt/usr/bin/ffmpeg"
-AudioSegment.ffprobe   = "/layers/digitalocean_apt/apt/usr/bin/ffprobe"
-
 # --------------------------
-# UI: upload pliku lub link
+# 3️⃣ UI: Upload / YouTube
 # --------------------------
-uploaded_file = st.file_uploader(
-    "Wrzuć podcast (audio/video)", type=["mp3", "wav", "mp4"]
-)
+uploaded_file = st.file_uploader("Wrzuć podcast (audio/video)", type=["mp3", "wav", "mp4"])
 youtube_url = st.text_input("🔗 Lub wklej link do YouTube")
 
 # --------------------------
-# Funkcja: video -> audio
+# 4️⃣ Funkcja: video -> audio
 # --------------------------
 def extract_audio_from_video(video_file):
+    video_file.seek(0)  # 🔹 Ważne: przewijamy do początku
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_video:
         tmp_video.write(video_file.read())
         tmp_video_path = tmp_video.name
 
     if not os.path.exists(tmp_video_path) or os.path.getsize(tmp_video_path) == 0:
-        raise ValueError("Przesłany plik jest pusty lub nie został zapisany poprawnie!")
+        raise ValueError("Przesłany plik jest pusty lub nie zapisany poprawnie!")
 
     try:
         audio = AudioSegment.from_file(tmp_video_path)
@@ -54,7 +49,7 @@ def extract_audio_from_video(video_file):
     return tmp_audio_path
 
 # --------------------------
-# Funkcja: pobieranie audio z YouTube
+# 5️⃣ Funkcja: YouTube -> audio
 # --------------------------
 def download_audio_from_youtube(url):
     output_path = "podcast.%(ext)s"
@@ -69,7 +64,7 @@ def download_audio_from_youtube(url):
     return filename
 
 # --------------------------
-# Funkcja: transkrypcja
+# 6️⃣ Funkcja: transkrypcja
 # --------------------------
 def transcribe_audio(file_path):
     with open(file_path, "rb") as f:
@@ -80,13 +75,13 @@ def transcribe_audio(file_path):
     return transcription.text
 
 # --------------------------
-# Funkcja: dzielenie tekstu
+# 7️⃣ Funkcja: dzielenie tekstu
 # --------------------------
 def split_text(text, max_length=4000):
     return [text[i:i+max_length] for i in range(0, len(text), max_length)]
 
 # --------------------------
-# Funkcja: analiza podcastu
+# 8️⃣ Funkcja: analiza podcastu
 # --------------------------
 def analyze_podcast(text):
     PROMPT = """
@@ -109,57 +104,49 @@ Tekst:
     return response.choices[0].message.content
 
 # --------------------------
-# Główny flow aplikacji
+# 9️⃣ Główny flow aplikacji
 # --------------------------
 if st.button("🚀 Analizuj podcast"):
-
-    # 1️⃣ przygotowanie audio
     try:
+        # 🔹 Przygotowanie audio
         if youtube_url:
             with st.spinner("📥 Pobieranie audio z YouTube..."):
                 audio_path = download_audio_from_youtube(youtube_url)
-
         elif uploaded_file:
-            if uploaded_file.type.startswith("video"):
+            if "video" in uploaded_file.type:
                 audio_path = extract_audio_from_video(uploaded_file)
             else:
+                uploaded_file.seek(0)
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                     tmp.write(uploaded_file.read())
                     audio_path = tmp.name
         else:
             st.error("Wrzuć plik lub podaj link do YouTube!")
             st.stop()
-    except Exception as e:
-        st.error(f"Nie udało się przygotować audio: {e}")
-        st.stop()
 
-    # 2️⃣ transkrypcja
-    try:
+        # 🔹 Transkrypcja
         with st.spinner("📝 Transkrypcja..."):
             text = transcribe_audio(audio_path)
+        st.subheader("📄 Transkrypcja")
+        st.write(text)
+
+        # 🔹 Chunking i analiza
+        chunks = split_text(text)
+        summaries = []
+        with st.spinner("🧠 Analiza podcastu..."):
+            for chunk in chunks:
+                summaries.append(analyze_podcast(chunk))
+
+        # 🔹 Finalna analiza
+        final_text = "\n".join(summaries)
+        final_summary = analyze_podcast(final_text)
+        st.subheader("📊 Finalna analiza")
+        st.write(final_summary)
+
     except Exception as e:
-        st.error(f"Błąd transkrypcji: {e}")
-        st.stop()
+        st.error(f"Nie udało się przygotować audio: {e}")
 
-    st.subheader("📄 Transkrypcja")
-    st.write(text)
-
-    # 3️⃣ chunking
-    chunks = split_text(text)
-    summaries = []
-    with st.spinner("🧠 Analiza podcastu..."):
-        for chunk in chunks:
-            summaries.append(analyze_podcast(chunk))
-
-    # 4️⃣ finalna analiza
-    final_text = "\n".join(summaries)
-    final_summary = analyze_podcast(final_text)
-
-    st.subheader("📊 Finalna analiza")
-    st.write(final_summary)
-
-    # 5️⃣ sprzątanie pliku tymczasowego
-    try:
-        os.remove(audio_path)
-    except:
-        pass
+    finally:
+        # 🔹 Sprzątanie plików tymczasowych
+        if 'audio_path' in locals() and os.path.exists(audio_path):
+            os.remove(audio_path)
