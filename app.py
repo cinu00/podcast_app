@@ -1,3 +1,11 @@
+import shutil
+import streamlit as st
+
+st.write("ffmpeg:", shutil.which("ffmpeg"))
+st.write("ffprobe:", shutil.which("ffprobe"))
+
+
+
 import streamlit as st
 import tempfile
 import os
@@ -5,6 +13,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydub import AudioSegment
 import yt_dlp
+
+
 
 # 🔹 1. ustawienia strony
 st.set_page_config(page_title="Podcast Analyzer AI")
