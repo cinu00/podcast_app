@@ -31,29 +31,33 @@ youtube_url = st.text_input("🔗 Lub wklej link do YouTube")
 # 4️⃣ Funkcja: video -> audio
 # --------------------------
 def extract_audio_from_video(video_file):
+    import subprocess
     import os
+    import tempfile
 
-    video_file.seek(0)  # 🔥 ważne!
-    
+    video_file.seek(0)
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_video:
-        data = video_file.read()
-        tmp_video.write(data)
+        tmp_video.write(video_file.read())
         tmp_video_path = tmp_video.name
 
-    # 🔍 DEBUG
-    print("Plik zapisany:", tmp_video_path)
-    print("Rozmiar pliku:", os.path.getsize(tmp_video_path))
-
-    if os.path.getsize(tmp_video_path) == 0:
-        raise ValueError("Plik wideo jest pusty!")
-
-    try:
-        audio = AudioSegment.from_file(tmp_video_path)
-    except Exception as e:
-        raise RuntimeError(f"Błąd ffmpeg/pydub: {e}")
-
     tmp_audio_path = tmp_video_path.replace(".mp4", ".wav")
-    audio.export(tmp_audio_path, format="wav")
+
+    # 🔥 używamy ffmpeg bezpośrednio (bez pydub)
+    command = [
+        "/layers/digitalocean_apt/apt/usr/bin/ffmpeg",
+        "-i", tmp_video_path,
+        "-vn",  # bez video
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        tmp_audio_path
+    ]
+
+    result = subprocess.run(command, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"FFMPEG ERROR:\n{result.stderr}")
 
     return tmp_audio_path
 # --------------------------
