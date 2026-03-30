@@ -31,23 +31,31 @@ youtube_url = st.text_input("🔗 Lub wklej link do YouTube")
 # 4️⃣ Funkcja: video -> audio
 # --------------------------
 def extract_audio_from_video(video_file):
-    video_file.seek(0)  # 🔹 Ważne: przewijamy do początku
+    import os
+
+    video_file.seek(0)  # 🔥 ważne!
+    
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_video:
-        tmp_video.write(video_file.read())
+        data = video_file.read()
+        tmp_video.write(data)
         tmp_video_path = tmp_video.name
 
-    if not os.path.exists(tmp_video_path) or os.path.getsize(tmp_video_path) == 0:
-        raise ValueError("Przesłany plik jest pusty lub nie zapisany poprawnie!")
+    # 🔍 DEBUG
+    print("Plik zapisany:", tmp_video_path)
+    print("Rozmiar pliku:", os.path.getsize(tmp_video_path))
+
+    if os.path.getsize(tmp_video_path) == 0:
+        raise ValueError("Plik wideo jest pusty!")
 
     try:
         audio = AudioSegment.from_file(tmp_video_path)
     except Exception as e:
-        raise RuntimeError(f"Nie udało się odczytać audio z pliku: {e}")
+        raise RuntimeError(f"Błąd ffmpeg/pydub: {e}")
 
-    tmp_audio_path = tmp_video_path.rsplit(".", 1)[0] + ".wav"
+    tmp_audio_path = tmp_video_path.replace(".mp4", ".wav")
     audio.export(tmp_audio_path, format="wav")
-    return tmp_audio_path
 
+    return tmp_audio_path
 # --------------------------
 # 5️⃣ Funkcja: YouTube -> audio
 # --------------------------
