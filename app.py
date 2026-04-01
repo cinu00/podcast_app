@@ -4,6 +4,34 @@ from openai import OpenAI
 import tempfile
 import os
 from dotenv import load_dotenv
+import subprocess  # <- potrzebne do sprawdzenia ffmpeg
+
+# --------------------
+# Sprawdzenie ffmpeg
+# --------------------
+try:
+    version = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
+    st.write("✅ FFmpeg jest dostępny w środowisku!")
+    st.text(version.stdout)
+except Exception as e:
+    st.error("❌ FFmpeg NIE jest dostępny w środowisku!")
+    st.text(str(e))
+
+# --------------------
+# Ładowanie klucza OpenAI
+# --------------------
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+
+
+import streamlit as st
+from pydub import AudioSegment
+from openai import OpenAI
+import tempfile
+import os
+from dotenv import load_dotenv
 
 # --------------------
 # Ładowanie klucza OpenAI
