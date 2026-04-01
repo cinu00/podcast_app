@@ -56,20 +56,30 @@ def save_uploaded_file(uploaded_file):
 
 def extract_audio(file_path):
     import os
+    import subprocess
 
-    # 🔥 sprawdzenie czy plik nie jest pusty
     if os.path.getsize(file_path) == 0:
         st.error("Plik jest pusty ❌")
         return None
 
     if file_path.endswith(".mp4"):
+        audio_path = file_path.replace(".mp4", ".mp3")
+
         try:
-            audio_path = file_path.replace(".mp4", ".mp3")
-            audio = AudioSegment.from_file(file_path)
-            audio.export(audio_path, format="mp3")
+            result = subprocess.run(
+                ["ffmpeg", "-i", file_path, "-q:a", "0", "-map", "a", audio_path, "-y"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+
+            if result.returncode != 0:
+                st.error("Błąd ffmpeg:\n" + result.stderr.decode())
+                return None
+
             return audio_path
+
         except Exception as e:
-            st.error(f"Błąd ffmpeg: {e}")
+            st.error(f"Błąd przy wywołaniu ffmpeg: {e}")
             return None
     else:
         return file_path
