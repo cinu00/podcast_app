@@ -26,6 +26,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 
+
 import streamlit as st
 from pydub import AudioSegment
 from openai import OpenAI
@@ -42,27 +43,36 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # --------------------
 # Funkcje pomocnicze
 # --------------------
-def save_uploaded_file(uploaded_file, suffix=None):
-    """Zapisuje uploaded_file do tymczasowego pliku i zwraca ścieżkę."""
-    if not suffix:
-        if uploaded_file.type.startswith("video"):
-            suffix = ".mp4"
-        else:
-            suffix = ".mp3"
+def save_uploaded_file(uploaded_file):
+    import tempfile
+
+    suffix = ".mp4" if uploaded_file.type.startswith("video") else ".mp3"
+
+    data = uploaded_file.getvalue()  # 🔥 KLUCZOWA ZMIANA
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(uploaded_file.getbuffer())  # <- bardzo ważne
+        tmp.write(data)
         return tmp.name
 
 def extract_audio(file_path):
-    """Wyodrębnia audio z wideo, jeśli trzeba. Zwraca ścieżkę do pliku mp3."""
-    if file_path.endswith(".mp4"):
-        audio_path = file_path.replace(".mp4", ".mp3")
-        audio = AudioSegment.from_file(file_path)
-        audio.export(audio_path, format="mp3")
-        return audio_path
-    else:
-        return file_path  # plik już jest audio
+    import os
 
+    # 🔥 sprawdzenie czy plik nie jest pusty
+    if os.path.getsize(file_path) == 0:
+        st.error("Plik jest pusty ❌")
+        return None
+
+    if file_path.endswith(".mp4"):
+        try:
+            audio_path = file_path.replace(".mp4", ".mp3")
+            audio = AudioSegment.from_file(file_path)
+            audio.export(audio_path, format="mp3")
+            return audio_path
+        except Exception as e:
+            st.error(f"Błąd ffmpeg: {e}")
+            return None
+    else:
+        return file_path
 def transcribe(audio_path):
     """Transkrypcja audio przy użyciu Whisper."""
     try:
@@ -109,6 +119,16 @@ if uploaded_file:
     tmp_path = save_uploaded_file(uploaded_file)
     audio_path = extract_audio(tmp_path)
     st.audio(audio_path)
+
+    import os
+    st.write("Ścieżka pliku:", tmp_path)
+    st.write("Rozmiar pliku (bajty):", os.path.getsize(tmp_path))
+
+    # Dopiero potem przetwarzanie
+    audio_path = extract_audio(tmp_path)
+
+    if audio_path:
+        st.audio(audio_path)
 
     # Transkrypcja i podsumowanie
     if st.button("Transkrybuj i podsumuj"):
