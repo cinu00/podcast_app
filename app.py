@@ -6,12 +6,19 @@ import shutil
 print("FFMPEG:", shutil.which("ffmpeg"))
 print("FFPROBE:", shutil.which("ffprobe"))
 
+from pydub import AudioSegment
+
 def extract_audio(video_file):
-    """Funkcja do wyodrębniania audio z pliku wideo"""
-    audio = AudioSegment.from_file(video_file)
-    audio_file_path = "extracted_audio.mp3"
-    audio.export(audio_file_path, format="mp3")
-    return audio_file_path
+    # zapis pliku tymczasowego
+    with open("temp.mp4", "wb") as f:
+        f.write(video_file.read())
+
+    # dopiero teraz pydub
+    audio = AudioSegment.from_file("temp.mp4")
+
+    audio.export("audio.wav", format="wav")
+
+    return "audio.wav"
 
 st.title("Aplikacja do przetwarzania multimediów")
 
