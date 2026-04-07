@@ -2,7 +2,9 @@ import streamlit as st
 from pydub import AudioSegment
 
 import shutil
-print("ffmpeg:", shutil.which("ffmpeg"))
+
+print("FFMPEG:", shutil.which("ffmpeg"))
+print("FFPROBE:", shutil.which("ffprobe"))
 
 def extract_audio(video_file):
     """Funkcja do wyodrębniania audio z pliku wideo"""
