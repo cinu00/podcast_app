@@ -1,5 +1,7 @@
 import streamlit as st
 from pydub import AudioSegment
+import subprocess
+
 
 import shutil
 
@@ -9,17 +11,27 @@ print("FFPROBE:", shutil.which("ffprobe"))
 from pydub import AudioSegment
 
 def extract_audio(uploaded_file):
-    # Zapisz plik tymczasowy
-    uploaded_file.seek(0)  # ustaw wskaźnik na początek
+    # upewnij się, że czytamy od początku
+    uploaded_file.seek(0)
+
+    # zapis pliku na dysk
     with open("temp.mp4", "wb") as f:
         f.write(uploaded_file.read())
 
-    # Konwersja do audio
+    # 🔍 DEBUG - sprawdzamy co widzi ffprobe
+    result = subprocess.run(
+        ["ffprobe", "temp.mp4"],
+        capture_output=True,
+        text=True
+    )
+    print("FFPROBE OUTPUT:", result.stdout)
+    print("FFPROBE ERR:", result.stderr)
+
+    # konwersja audio
     audio = AudioSegment.from_file("temp.mp4")
-
     audio.export("audio.wav", format="wav")
-    return "audio.wav"
 
+    return "audio.wav"
 st.title("Aplikacja do przetwarzania multimediów")
 
 uploaded_file = st.file_uploader("Prześlij plik audio lub wideo", type=["mp3", "mp4", "wav"])
