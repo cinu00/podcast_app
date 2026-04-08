@@ -8,16 +8,16 @@ print("FFPROBE:", shutil.which("ffprobe"))
 
 from pydub import AudioSegment
 
-def extract_audio(video_file):
-    # zapis pliku tymczasowego
+def extract_audio(uploaded_file):
+    # Zapisz plik tymczasowy
+    uploaded_file.seek(0)  # ustaw wskaźnik na początek
     with open("temp.mp4", "wb") as f:
-        f.write(video_file.read())
+        f.write(uploaded_file.read())
 
-    # dopiero teraz pydub
+    # Konwersja do audio
     audio = AudioSegment.from_file("temp.mp4")
 
     audio.export("audio.wav", format="wav")
-
     return "audio.wav"
 
 st.title("Aplikacja do przetwarzania multimediów")
