@@ -1,5 +1,4 @@
 ffmpeg
-libvpx7
-libx264-dev
-libavcodec-extra
 libpulse0
+libpulse-dev
+libglib2.0-0
