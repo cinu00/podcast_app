@@ -1,5 +1,1 @@
 ffmpeg
-libpulse0
-libpulse-dev
-libglib2
-libpulse-mainloop-glib0
