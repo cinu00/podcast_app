@@ -1,6 +1,4 @@
-streamlit
 openai
-pathlib
+streamlit
+streamlit-audiorecorder
 pydub
-dotenv
-boto3
