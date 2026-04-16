@@ -6,6 +6,13 @@ from openai import OpenAI, AuthenticationError, OpenAIError
 from pydub import AudioSegment
 from hashlib import md5
 
+import shutil
+import streamlit as st
+
+st.write("ffmpeg:", shutil.which("ffmpeg"))
+st.write("ffprobe:", shutil.which("ffprobe"))
+
+
 # env = dotenv_values('.env')
 AUDIO_TRANSCRIBE_MODEL='whisper-1'
 
