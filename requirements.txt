@@ -2,3 +2,4 @@ openai
 streamlit
 streamlit-audiorecorder
 pydub
+python-dotenv
