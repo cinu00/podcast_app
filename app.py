@@ -1,122 +1,206 @@
 import streamlit as st
-from openai import OpenAI
 import tempfile
 import os
 from dotenv import load_dotenv
-import subprocess
+from openai import OpenAI
+from pydub import AudioSegment
+import yt_dlp
 
-# --------------------
-# Ładowanie klucza OpenAI
-# --------------------
+# --------------------------
+# 🔹 CONFIG (MUSI BYĆ NA GÓRZE)
+# --------------------------
+st.set_page_config(page_title="Podcast Analyzer AI")
+
+# --------------------------
+# 🔹 API KEY
+# --------------------------
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# --------------------
-# Funkcje pomocnicze
-# --------------------
-def save_uploaded_file(uploaded_file):
-    """Zapisuje plik do systemu tymczasowego"""
-    suffix = ".mp4" if uploaded_file.type.startswith("video") else ".mp3"
-    data = uploaded_file.getvalue()
+api_key = st.text_input("🔑 Wklej swój OpenAI API Key:", type="password") or os.getenv("OPENAI_API_KEY")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(data)
-        return tmp.name
+if not api_key:
+    st.warning("❗ Podaj klucz OpenAI aby korzystać z aplikacji")
+    st.stop()
 
+client = OpenAI(api_key=api_key)
 
-def extract_audio(file_path):
-    """Wyodrębnia audio z wideo przy użyciu ffmpeg"""
-    if os.path.getsize(file_path) == 0:
-        st.error("Plik jest pusty ❌")
-        return None
+# --------------------------
+# 🔹 UI
+# --------------------------
+st.title("🎙️ Podcast Analyzer AI")
 
-    if file_path.endswith(".mp4"):
-        audio_path = file_path.replace(".mp4", ".mp3")
+st.info("💡 Jeśli YouTube nie działa — wrzuć plik MP3 lub MP4")
 
-        try:
-            result = subprocess.run(
-                ["ffmpeg", "-i", file_path, "-q:a", "0", "-map", "a", audio_path, "-y"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
+st.markdown(
+    """
+    <style>
+    body {
+        background: linear-gradient(135deg, #1f1c2c, #928dab);
+        color: #ffffff;
+    }
 
-            if result.returncode != 0:
-                st.error("Błąd ffmpeg:\n" + result.stderr.decode())
-                return None
-
-            return audio_path
-
-        except Exception as e:
-            st.error(f"Błąd ffmpeg: {e}")
-            return None
-    else:
-        return file_path
-
-
-def transcribe(audio_path):
-    """Transkrypcja audio (Whisper)"""
-    try:
-        with open(audio_path, "rb") as f:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f
-            )
-        return transcript.text
-    except Exception as e:
-        st.error(f"Błąd przy transkrypcji: {e}")
-        return ""
-
-
-def summarize(text):
-    """Podsumowanie tekstu (GPT-4o)"""
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Streszcz tekst w kilku punktach."},
-                {"role": "user", "content": text}
-            ]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Błąd przy podsumowaniu: {e}")
-        return ""
-
-
-# --------------------
-# UI Streamlit
-# --------------------
-st.title("🎧 Audio/Video Transcriber & Summarizer")
-st.write("Wgraj plik audio lub wideo, a aplikacja zrobi transkrypcję i podsumowanie.")
-
-uploaded_file = st.file_uploader(
-    "Wgraj plik (mp3, wav, mp4)",
-    type=["mp3", "wav", "mp4"]
+    .stButton>button {
+        background-color: #6c5ce7;
+        color: white;
+        font-weight: bold;
+        border-radius: 10px;
+        padding: 0.6em 1.2em;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
-if uploaded_file:
-    st.success(f"Plik {uploaded_file.name} wczytany!")
+# --------------------------
+# 🔹 INPUT
+# --------------------------
+uploaded_file = st.file_uploader(
+    "📂 Wrzuć podcast",
+    type=["mp3", "wav", "mp4", "m4a"]
+)
 
-    # zapis pliku
-    tmp_path = save_uploaded_file(uploaded_file)
+youtube_url = st.text_input("🔗 Lub wklej link do YouTube")
 
-    # ekstrakcja audio
-    audio_path = extract_audio(tmp_path)
+# --------------------------
+# 🔹 VIDEO → AUDIO
+# --------------------------
+def extract_audio_from_video(video_file):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_video:
+        tmp_video.write(video_file.read())
+        tmp_video_path = tmp_video.name
 
-    if audio_path:
-        st.audio(audio_path)
+    audio = AudioSegment.from_file(tmp_video_path)
+    tmp_audio_path = tmp_video_path.replace(".mp4", ".wav")
+    audio.export(tmp_audio_path, format="wav")
 
-        # przycisk
-        if st.button("Transkrybuj i podsumuj"):
-            with st.spinner("🔄 Transkrypcja..."):
-                text = transcribe(audio_path)
+    return tmp_audio_path
 
-            st.subheader("📝 Transkrypcja")
-            st.text_area("Tekst", text, height=200)
+# --------------------------
+# 🔹 YOUTUBE → AUDIO (WAV)
+# --------------------------
+def download_audio_from_youtube(url):
+    try:
+        output_path = "podcast.%(ext)s"
 
-            with st.spinner("✨ Generowanie podsumowania..."):
-                summary = summarize(text)
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_path,
+            'quiet': True,
+            'noplaylist': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'wav',
+                'preferredquality': '192',
+            }],
+        }
 
-            st.subheader("📌 Podsumowanie")
-            st.text_area("Podsumowanie", summary, height=150)
-            
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+
+        return filename.rsplit('.', 1)[0] + ".wav"
+
+    except Exception as e:
+        st.error("❌ Nie udało się pobrać audio z YouTube")
+        st.write(str(e))
+        st.stop()
+
+# --------------------------
+# 🔹 TRANSKRYPCJA
+# --------------------------
+def transcribe_audio(file_path):
+    with open(file_path, "rb") as f:
+        transcription = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f
+        )
+    return transcription.text
+
+# --------------------------
+# 🔹 CHUNKING
+# --------------------------
+def split_text(text, max_length=4000):
+    return [text[i:i+max_length] for i in range(0, len(text), max_length)]
+
+# --------------------------
+# 🔹 ANALIZA
+# --------------------------
+def analyze_podcast(text):
+    PROMPT = """
+Przeanalizuj poniższy podcast i przygotuj:
+
+1. Krótkie streszczenie (max 5 zdań)
+2. Najważniejsze wnioski (bullet points)
+3. Kluczowe tematy
+4. 3 najciekawsze cytaty
+
+Tekst:
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "Jesteś ekspertem od analizy podcastów."},
+            {"role": "user", "content": PROMPT + text}
+        ]
+    )
+
+    return response.choices[0].message.content
+
+# --------------------------
+# 🔹 MAIN FLOW
+# --------------------------
+if st.button("🚀 Analizuj podcast"):
+
+    try:
+        # --------------------------
+        # 1. AUDIO SOURCE
+        # --------------------------
+        if youtube_url:
+            with st.spinner("📥 Pobieranie z YouTube..."):
+                audio_path = download_audio_from_youtube(youtube_url)
+
+        elif uploaded_file:
+            if "video" in uploaded_file.type:
+                audio_path = extract_audio_from_video(uploaded_file)
+            else:
+                audio = AudioSegment.from_file(uploaded_file)
+                tmp_audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
+                audio.export(tmp_audio_path, format="wav")
+                audio_path = tmp_audio_path
+        else:
+            st.error("❗ Wrzuć plik lub podaj link")
+            st.stop()
+
+        # --------------------------
+        # 2. TRANSKRYPCJA
+        # --------------------------
+        with st.spinner("📝 Transkrypcja..."):
+            text = transcribe_audio(audio_path)
+
+        st.subheader("📄 Transkrypcja")
+        st.write(text)
+
+        # --------------------------
+        # 3. ANALIZA
+        # --------------------------
+        chunks = split_text(text)
+        summaries = []
+
+        with st.spinner("🧠 Analiza..."):
+            for chunk in chunks:
+                summaries.append(analyze_podcast(chunk))
+
+        final_summary = analyze_podcast("\n".join(summaries))
+
+        st.subheader("📊 Podsumowanie")
+        st.write(final_summary)
+
+        # --------------------------
+        # CLEANUP
+        # --------------------------
+        os.remove(audio_path)
+
+    except Exception as e:
+        st.error("❌ Coś poszło nie tak")
+        st.write(str(e))
