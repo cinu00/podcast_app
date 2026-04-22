@@ -1,33 +1,47 @@
 import streamlit as st
-from openai import OpenAI
 import tempfile
 import os
-from dotenv import load_dotenv
+import traceback
 import subprocess
+from dotenv import load_dotenv
+from openai import OpenAI
+import yt_dlp
 
-# --------------------
-# Ładowanie klucza OpenAI
-# --------------------
+# --------------------------
+# 🔹 CONFIG
+# --------------------------
+st.set_page_config(page_title="Podcast Analyzer AI")
+
+# --------------------------
+# 🔹 API KEY
+# --------------------------
 load_dotenv()
-# --------------------
-# Klucz OpenAI (z UI)
-# --------------------
-api_key = st.text_input(
-    "🔑 Wpisz swój OpenAI API Key",
-    type="password"
-)
+
+api_key = st.text_input("🔑 Wklej swój OpenAI API Key:", type="password") or os.getenv("OPENAI_API_KEY")
 
 if not api_key:
-    st.warning("Podaj klucz API, aby kontynuować")
+    st.warning("❗ Podaj klucz OpenAI")
     st.stop()
 
 client = OpenAI(api_key=api_key)
 
-# --------------------
-# Funkcje pomocnicze
-# --------------------
+# --------------------------
+# 🔹 UI
+# --------------------------
+st.title("🎙️ Podcast Analyzer AI")
+st.info("💡 Możesz wrzucić MP3/MP4 lub wkleić link YouTube")
+
+uploaded_file = st.file_uploader(
+    "📂 Wrzuć podcast",
+    type=["mp3", "wav", "mp4", "m4a"]
+)
+
+youtube_url = st.text_input("🔗 Lub wklej link do YouTube")
+
+# --------------------------
+# 🔹 SAVE FILE
+# --------------------------
 def save_uploaded_file(uploaded_file):
-    """Zapisuje plik do systemu tymczasowego"""
     suffix = ".mp4" if uploaded_file.type.startswith("video") else ".mp3"
     data = uploaded_file.getvalue()
 
@@ -35,13 +49,10 @@ def save_uploaded_file(uploaded_file):
         tmp.write(data)
         return tmp.name
 
-
+# --------------------------
+# 🔹 MP4 → MP3 (FFMPEG)
+# --------------------------
 def extract_audio(file_path):
-    """Wyodrębnia audio z wideo przy użyciu ffmpeg"""
-    if os.path.getsize(file_path) == 0:
-        st.error("Plik jest pusty ❌")
-        return None
-
     if file_path.endswith(".mp4"):
         audio_path = file_path.replace(".mp4", ".mp3")
 
@@ -53,81 +64,143 @@ def extract_audio(file_path):
             )
 
             if result.returncode != 0:
-                st.error("Błąd ffmpeg:\n" + result.stderr.decode())
+                st.error("❌ Błąd ffmpeg:\n" + result.stderr.decode())
                 return None
 
             return audio_path
 
-        except Exception as e:
-            st.error(f"Błąd ffmpeg: {e}")
+        except Exception:
+            st.error("❌ FFmpeg crash:")
+            st.text(traceback.format_exc())
             return None
     else:
         return file_path
 
-
-def transcribe(audio_path):
-    """Transkrypcja audio (Whisper)"""
+# --------------------------
+# 🔹 YOUTUBE → MP3
+# --------------------------
+def download_audio_from_youtube(url):
     try:
-        with open(audio_path, "rb") as f:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f
-            )
-        return transcript.text
-    except Exception as e:
-        st.error(f"Błąd przy transkrypcji: {e}")
-        return ""
+        output_path = "podcast.%(ext)s"
 
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_path,
+            'quiet': True,
+            'noplaylist': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '64',
+            }],
+        }
 
-def summarize(text):
-    """Podsumowanie tekstu (GPT-4o)"""
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Streszcz tekst w kilku punktach."},
-                {"role": "user", "content": text}
-            ]
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+
+        return filename.rsplit('.', 1)[0] + ".mp3"
+
+    except Exception:
+        st.error("❌ YouTube error:")
+        st.text(traceback.format_exc())
+        raise
+
+# --------------------------
+# 🔹 TRANSKRYPCJA
+# --------------------------
+def transcribe_audio(file_path):
+    with open(file_path, "rb") as f:
+        transcription = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=f
         )
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Błąd przy podsumowaniu: {e}")
-        return ""
+    return transcription.text
 
+# --------------------------
+# 🔹 CHUNKING
+# --------------------------
+def split_text(text, max_length=4000):
+    return [text[i:i+max_length] for i in range(0, len(text), max_length)]
 
-# --------------------
-# UI Streamlit
-# --------------------
-st.title("🎧 Audio/Video Transcriber & Summarizer")
-st.write("Wgraj plik audio lub wideo, a aplikacja zrobi transkrypcję i podsumowanie.")
+# --------------------------
+# 🔹 ANALIZA
+# --------------------------
+def analyze_podcast(text):
+    PROMPT = """
+Przeanalizuj podcast i przygotuj:
 
-uploaded_file = st.file_uploader(
-    "Wgraj plik (mp3, wav, mp4)",
-    type=["mp3", "wav", "mp4"]
-)
+1. Krótkie streszczenie (max 5 zdań)
+2. Najważniejsze wnioski (bullet points)
+3. Kluczowe tematy
+4. 3 najciekawsze cytaty
 
-if uploaded_file:
-    st.success(f"Plik {uploaded_file.name} wczytany!")
+Tekst:
+"""
 
-    # zapis pliku
-    tmp_path = save_uploaded_file(uploaded_file)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "Jesteś ekspertem od analizy podcastów."},
+            {"role": "user", "content": PROMPT + text}
+        ]
+    )
 
-    # ekstrakcja audio
-    audio_path = extract_audio(tmp_path)
+    return response.choices[0].message.content
 
-    if audio_path:
-        st.audio(audio_path)
+# --------------------------
+# 🔹 MAIN
+# --------------------------
+if st.button("🚀 Analizuj podcast"):
 
-        # przycisk
-        if st.button("Transkrybuj i podsumuj"):
-            with st.spinner("🔄 Transkrypcja..."):
-                text = transcribe(audio_path)
+    try:
+        # 1️⃣ ŹRÓDŁO AUDIO
+        if youtube_url:
+            with st.spinner("📥 Pobieranie z YouTube..."):
+                file_path = download_audio_from_youtube(youtube_url)
+        elif uploaded_file:
+            file_path = save_uploaded_file(uploaded_file)
+        else:
+            st.error("❗ Wrzuć plik lub podaj link")
+            st.stop()
 
-            st.subheader("📝 Transkrypcja")
-            st.text_area("Tekst", text, height=200)
+        # 2️⃣ KONWERSJA MP4 → MP3
+        audio_path = extract_audio(file_path)
 
-            with st.spinner("✨ Generowanie podsumowania..."):
-                summary = summarize(text)
+        if not audio_path:
+            st.stop()
 
-            st.subheader("📌 Podsumowanie")
-            st.text_area("Podsumowanie", summary, height=150)
+        # 3️⃣ CHECK SIZE
+        size_mb = os.path.getsize(audio_path) / 1_000_000
+        st.write(f"📦 Rozmiar pliku: {round(size_mb,2)} MB")
+
+        if size_mb > 25:
+            st.error("❌ Plik za duży (limit 25MB)")
+            st.stop()
+
+        # 4️⃣ TRANSKRYPCJA
+        with st.spinner("📝 Transkrypcja..."):
+            text = transcribe_audio(audio_path)
+
+        st.subheader("📄 Transkrypcja")
+        st.write(text)
+
+        # 5️⃣ ANALIZA
+        chunks = split_text(text)
+        summaries = []
+
+        with st.spinner("🧠 Analiza..."):
+            for chunk in chunks:
+                summaries.append(analyze_podcast(chunk))
+
+        final_summary = analyze_podcast("\n".join(summaries))
+
+        st.subheader("📊 Podsumowanie")
+        st.write(final_summary)
+
+        # 6️⃣ CLEANUP
+        os.remove(audio_path)
+
+    except Exception:
+        st.error("❌ FULL ERROR:")
+        st.text(traceback.format_exc())
