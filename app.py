@@ -1,13 +1,14 @@
 import streamlit as st
 import tempfile
 import os
+import traceback
 from dotenv import load_dotenv
 from openai import OpenAI
 from pydub import AudioSegment
 import yt_dlp
 
 # --------------------------
-# 🔹 CONFIG (MUSI BYĆ NA GÓRZE)
+# 🔹 CONFIG
 # --------------------------
 st.set_page_config(page_title="Podcast Analyzer AI")
 
@@ -19,7 +20,7 @@ load_dotenv()
 api_key = st.text_input("🔑 Wklej swój OpenAI API Key:", type="password") or os.getenv("OPENAI_API_KEY")
 
 if not api_key:
-    st.warning("❗ Podaj klucz OpenAI aby korzystać z aplikacji")
+    st.warning("❗ Podaj klucz OpenAI")
     st.stop()
 
 client = OpenAI(api_key=api_key)
@@ -28,32 +29,8 @@ client = OpenAI(api_key=api_key)
 # 🔹 UI
 # --------------------------
 st.title("🎙️ Podcast Analyzer AI")
+st.info("💡 Jeśli YouTube nie działa → wrzuć plik MP3 lub MP4")
 
-st.info("💡 Jeśli YouTube nie działa — wrzuć plik MP3 lub MP4")
-
-st.markdown(
-    """
-    <style>
-    body {
-        background: linear-gradient(135deg, #1f1c2c, #928dab);
-        color: #ffffff;
-    }
-
-    .stButton>button {
-        background-color: #6c5ce7;
-        color: white;
-        font-weight: bold;
-        border-radius: 10px;
-        padding: 0.6em 1.2em;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# --------------------------
-# 🔹 INPUT
-# --------------------------
 uploaded_file = st.file_uploader(
     "📂 Wrzuć podcast",
     type=["mp3", "wav", "mp4", "m4a"]
@@ -62,7 +39,7 @@ uploaded_file = st.file_uploader(
 youtube_url = st.text_input("🔗 Lub wklej link do YouTube")
 
 # --------------------------
-# 🔹 VIDEO → AUDIO
+# 🔹 VIDEO → AUDIO (MP3)
 # --------------------------
 def extract_audio_from_video(video_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_video:
@@ -70,13 +47,14 @@ def extract_audio_from_video(video_file):
         tmp_video_path = tmp_video.name
 
     audio = AudioSegment.from_file(tmp_video_path)
-    tmp_audio_path = tmp_video_path.replace(".mp4", ".wav")
-    audio.export(tmp_audio_path, format="wav")
+
+    tmp_audio_path = tmp_video_path.replace(".mp4", ".mp3")
+    audio.export(tmp_audio_path, format="mp3", bitrate="64k")
 
     return tmp_audio_path
 
 # --------------------------
-# 🔹 YOUTUBE → AUDIO (WAV)
+# 🔹 YOUTUBE → AUDIO (MP3)
 # --------------------------
 def download_audio_from_youtube(url):
     try:
@@ -89,8 +67,8 @@ def download_audio_from_youtube(url):
             'noplaylist': True,
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'wav',
-                'preferredquality': '192',
+                'preferredcodec': 'mp3',
+                'preferredquality': '64',
             }],
         }
 
@@ -98,12 +76,12 @@ def download_audio_from_youtube(url):
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
 
-        return filename.rsplit('.', 1)[0] + ".wav"
+        return filename.rsplit('.', 1)[0] + ".mp3"
 
-    except Exception as e:
-        st.error("❌ Nie udało się pobrać audio z YouTube")
-        st.write(str(e))
-        st.stop()
+    except Exception:
+        st.error("❌ YouTube error:")
+        st.text(traceback.format_exc())
+        raise
 
 # --------------------------
 # 🔹 TRANSKRYPCJA
@@ -127,7 +105,7 @@ def split_text(text, max_length=4000):
 # --------------------------
 def analyze_podcast(text):
     PROMPT = """
-Przeanalizuj poniższy podcast i przygotuj:
+Przeanalizuj podcast i przygotuj:
 
 1. Krótkie streszczenie (max 5 zdań)
 2. Najważniejsze wnioski (bullet points)
@@ -148,13 +126,13 @@ Tekst:
     return response.choices[0].message.content
 
 # --------------------------
-# 🔹 MAIN FLOW
+# 🔹 MAIN
 # --------------------------
 if st.button("🚀 Analizuj podcast"):
 
     try:
         # --------------------------
-        # 1. AUDIO SOURCE
+        # 1. SOURCE
         # --------------------------
         if youtube_url:
             with st.spinner("📥 Pobieranie z YouTube..."):
@@ -165,15 +143,25 @@ if st.button("🚀 Analizuj podcast"):
                 audio_path = extract_audio_from_video(uploaded_file)
             else:
                 audio = AudioSegment.from_file(uploaded_file)
-                tmp_audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-                audio.export(tmp_audio_path, format="wav")
+                tmp_audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
+                audio.export(tmp_audio_path, format="mp3", bitrate="64k")
                 audio_path = tmp_audio_path
         else:
             st.error("❗ Wrzuć plik lub podaj link")
             st.stop()
 
         # --------------------------
-        # 2. TRANSKRYPCJA
+        # 2. CHECK SIZE
+        # --------------------------
+        size_mb = os.path.getsize(audio_path) / 1_000_000
+        st.write(f"📦 Rozmiar pliku: {round(size_mb,2)} MB")
+
+        if size_mb > 25:
+            st.error("❌ Plik za duży (limit 25MB)")
+            st.stop()
+
+        # --------------------------
+        # 3. TRANSKRYPCJA
         # --------------------------
         with st.spinner("📝 Transkrypcja..."):
             text = transcribe_audio(audio_path)
@@ -182,7 +170,7 @@ if st.button("🚀 Analizuj podcast"):
         st.write(text)
 
         # --------------------------
-        # 3. ANALIZA
+        # 4. ANALIZA
         # --------------------------
         chunks = split_text(text)
         summaries = []
@@ -201,6 +189,6 @@ if st.button("🚀 Analizuj podcast"):
         # --------------------------
         os.remove(audio_path)
 
-    except Exception as e:
-        st.error("❌ Coś poszło nie tak")
-        st.write(str(e))
+    except Exception:
+        st.error("❌ FULL ERROR:")
+        st.text(traceback.format_exc())
