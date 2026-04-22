@@ -9,7 +9,19 @@ import subprocess
 # Ładowanie klucza OpenAI
 # --------------------
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# --------------------
+# Klucz OpenAI (z UI)
+# --------------------
+api_key = st.text_input(
+    "🔑 Wpisz swój OpenAI API Key",
+    type="password"
+)
+
+if not api_key:
+    st.warning("Podaj klucz API, aby kontynuować")
+    st.stop()
+
+client = OpenAI(api_key=api_key)
 
 # --------------------
 # Funkcje pomocnicze
