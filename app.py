@@ -3,6 +3,7 @@ import tempfile
 import os
 import traceback
 import subprocess
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 import yt_dlp
@@ -29,7 +30,7 @@ client = OpenAI(api_key=api_key)
 # 🔹 UI
 # --------------------------
 st.title("🎙️ Podcast Analyzer AI")
-st.info("💡 Możesz wrzucić MP3/MP4 lub wkleić link YouTube")
+st.info("💡 YouTube → najpierw napisy (szybciej), potem audio fallback")
 
 uploaded_file = st.file_uploader(
     "📂 Wrzuć podcast",
@@ -77,7 +78,42 @@ def extract_audio(file_path):
         return file_path
 
 # --------------------------
-# 🔹 YOUTUBE → MP3
+# 🔹 YOUTUBE → SUBTITLES
+# --------------------------
+def get_youtube_transcript(url):
+    try:
+        ydl_opts = {
+            'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['pl', 'en'],
+            'subtitlesformat': 'vtt',
+            'outtmpl': 'subtitles'
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(url, download=True)
+
+        for file in os.listdir():
+            if file.endswith(".vtt"):
+                with open(file, "r", encoding="utf-8") as f:
+                    return f.read()
+
+        return None
+
+    except Exception:
+        return None
+
+# --------------------------
+# 🔹 CLEAN SUBTITLES
+# --------------------------
+def clean_subtitles(text):
+    text = re.sub(r'\d{2}:\d{2}:\d{2}.*', '', text)
+    text = re.sub(r'\n+', '\n', text)
+    return text
+
+# --------------------------
+# 🔹 YOUTUBE → AUDIO (fallback)
 # --------------------------
 def download_audio_from_youtube(url):
     try:
@@ -102,9 +138,7 @@ def download_audio_from_youtube(url):
         return filename.rsplit('.', 1)[0] + ".mp3"
 
     except Exception:
-        st.error("❌ YouTube error:")
-        st.text(traceback.format_exc())
-        raise
+        return None
 
 # --------------------------
 # 🔹 TRANSKRYPCJA
@@ -130,8 +164,8 @@ def analyze_podcast(text):
     PROMPT = """
 Przeanalizuj podcast i przygotuj:
 
-1. Krótkie streszczenie (max 5 zdań)
-2. Najważniejsze wnioski (bullet points)
+1. Krótkie streszczenie
+2. Najważniejsze wnioski
 3. Kluczowe tematy
 4. 3 najciekawsze cytaty
 
@@ -154,38 +188,66 @@ Tekst:
 if st.button("🚀 Analizuj podcast"):
 
     try:
-        # 1️⃣ ŹRÓDŁO AUDIO
+        # ==========================
+        # 🔥 TRY: YOUTUBE SUBTITLES
+        # ==========================
         if youtube_url:
-            with st.spinner("📥 Pobieranie z YouTube..."):
-                file_path = download_audio_from_youtube(youtube_url)
+            with st.spinner("📄 Pobieranie napisów..."):
+                text = get_youtube_transcript(youtube_url)
+
+            if text:
+                st.success("✅ Użyto napisów (szybciej i bez limitów)")
+                text = clean_subtitles(text)
+
+            else:
+                st.warning("⚠️ Brak napisów → fallback do audio")
+
+                with st.spinner("📥 Pobieranie audio..."):
+                    file_path = download_audio_from_youtube(youtube_url)
+
+                if not file_path:
+                    st.error("❌ YouTube blokuje pobieranie")
+                    st.stop()
+
+                audio_path = extract_audio(file_path)
+
+                size_mb = os.path.getsize(audio_path) / 1_000_000
+                st.write(f"📦 Rozmiar: {round(size_mb,2)} MB")
+
+                if size_mb > 25:
+                    st.error("❌ Plik za duży (limit 25MB)")
+                    st.stop()
+
+                with st.spinner("📝 Transkrypcja..."):
+                    text = transcribe_audio(audio_path)
+
+        # ==========================
+        # 🔥 UPLOAD FILE
+        # ==========================
         elif uploaded_file:
             file_path = save_uploaded_file(uploaded_file)
+            audio_path = extract_audio(file_path)
+
+            size_mb = os.path.getsize(audio_path) / 1_000_000
+            st.write(f"📦 Rozmiar: {round(size_mb,2)} MB")
+
+            if size_mb > 25:
+                st.error("❌ Plik za duży (limit 25MB)")
+                st.stop()
+
+            with st.spinner("📝 Transkrypcja..."):
+                text = transcribe_audio(audio_path)
+
         else:
             st.error("❗ Wrzuć plik lub podaj link")
             st.stop()
 
-        # 2️⃣ KONWERSJA MP4 → MP3
-        audio_path = extract_audio(file_path)
-
-        if not audio_path:
-            st.stop()
-
-        # 3️⃣ CHECK SIZE
-        size_mb = os.path.getsize(audio_path) / 1_000_000
-        st.write(f"📦 Rozmiar pliku: {round(size_mb,2)} MB")
-
-        if size_mb > 25:
-            st.error("❌ Plik za duży (limit 25MB)")
-            st.stop()
-
-        # 4️⃣ TRANSKRYPCJA
-        with st.spinner("📝 Transkrypcja..."):
-            text = transcribe_audio(audio_path)
-
-        st.subheader("📄 Transkrypcja")
+        # ==========================
+        # 🔥 ANALIZA
+        # ==========================
+        st.subheader("📄 Tekst")
         st.write(text)
 
-        # 5️⃣ ANALIZA
         chunks = split_text(text)
         summaries = []
 
@@ -197,9 +259,6 @@ if st.button("🚀 Analizuj podcast"):
 
         st.subheader("📊 Podsumowanie")
         st.write(final_summary)
-
-        # 6️⃣ CLEANUP
-        os.remove(audio_path)
 
     except Exception:
         st.error("❌ FULL ERROR:")
