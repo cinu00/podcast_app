@@ -3,3 +3,4 @@ openai
 pydub
 yt-dlp
 python-dotenv
+requests
