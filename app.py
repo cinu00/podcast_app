@@ -84,26 +84,36 @@ def get_youtube_transcript(url):
     try:
         ydl_opts = {
             'skip_download': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': ['pl', 'en'],
-            'subtitlesformat': 'vtt',
-            'outtmpl': 'subtitles'
+            'quiet': True
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.extract_info(url, download=True)
+            info = ydl.extract_info(url, download=False)
 
-        for file in os.listdir():
-            if file.endswith(".vtt"):
-                with open(file, "r", encoding="utf-8") as f:
-                    return f.read()
+        subtitles = info.get("subtitles") or info.get("automatic_captions")
 
-        return None
+        if not subtitles:
+            return None
+
+        # preferuj PL → EN
+        for lang in ["pl", "en"]:
+            if lang in subtitles:
+                sub_url = subtitles[lang][0]["url"]
+
+                import requests
+                response = requests.get(sub_url)
+                return response.text
+
+        # fallback: pierwszy dostępny
+        first_lang = list(subtitles.keys())[0]
+        sub_url = subtitles[first_lang][0]["url"]
+
+        import requests
+        response = requests.get(sub_url)
+        return response.text
 
     except Exception:
         return None
-
 # --------------------------
 # 🔹 CLEAN SUBTITLES
 # --------------------------
